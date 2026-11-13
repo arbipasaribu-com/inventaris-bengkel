@@ -348,6 +348,12 @@
 
         // Initialize App
         function initApp() {
+            // Render Data terlebih dahulu agar elemen HTML (beserta tag ikonnya) masuk ke DOM
+            renderHome();
+            renderInventory();
+            renderTransactions();
+            
+            // Inisialisasi ikon untuk seluruh file statis
             lucide.createIcons();
             
             // Check session (mock)
@@ -358,11 +364,6 @@
             // Setup Listeners
             document.getElementById('login-form').addEventListener('submit', handleLogin);
             document.getElementById('btn-logout').addEventListener('click', handleLogout);
-
-            // Render Data
-            renderHome();
-            renderInventory();
-            renderTransactions();
 
             setupPWA();
         }
@@ -398,7 +399,6 @@
             document.getElementById('login-view').classList.add('hide-view');
             document.getElementById('main-view').classList.remove('hide-view');
             document.getElementById('main-view').classList.add('flex');
-            lucide.createIcons();
         }
 
         function switchTab(tabId) {
@@ -466,6 +466,7 @@
                 `;
             });
             container.innerHTML = html;
+            lucide.createIcons(); // Perbaikan: Langsung ubah ikon setelah disuntikkan
         }
 
         function renderInventory() {
@@ -506,6 +507,7 @@
                 `;
             });
             container.innerHTML = html;
+            lucide.createIcons(); // Perbaikan: Langsung ubah ikon setelah disuntikkan
         }
 
         function renderTransactions() {
@@ -551,6 +553,7 @@
                 `;
             });
             container.innerHTML = html;
+            lucide.createIcons(); // Perbaikan: Langsung ubah ikon setelah disuntikkan
         }
 
         // ================= PWA Setup (Blob Injection Strategy) =================
