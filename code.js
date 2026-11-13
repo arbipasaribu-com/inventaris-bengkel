@@ -3,12 +3,38 @@
 // ==========================================
 
 // 1. Fungsi Utama untuk Menyajikan WebApp
+// - Tanpa parameter  : menampilkan halaman index (jika dibuka langsung dari URL Apps Script)
+// - ?action=ping     : cek cepat bahwa API aktif (JSON)
 function doGet(e) {
+  if (e && e.parameter && e.parameter.action === 'ping') {
+    return jsonResponse({ success: true, message: 'SIPAT-BTI API aktif' });
+  }
   var html = HtmlService.createTemplateFromFile('index');
   return html.evaluate()
       .setTitle('SIPAT-BTI | Bengkel TI')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// 1b. Endpoint API untuk frontend yang di-hosting di luar Apps Script (GitHub Pages, dll)
+function doPost(e) {
+  try {
+    var body = JSON.parse(e.postData.contents);
+    switch (body.action) {
+      case 'login':
+        return jsonResponse(verifyLoginServer(body.username, body.password));
+      default:
+        return jsonResponse({ success: false, message: 'Aksi tidak dikenal.' });
+    }
+  } catch (err) {
+    return jsonResponse({ success: false, message: 'Request tidak valid: ' + err.message });
+  }
+}
+
+function jsonResponse(obj) {
+  return ContentService
+      .createTextOutput(JSON.stringify(obj))
+      .setMimeType(ContentService.MimeType.JSON);
 }
 
 // 2. FUNGSI PENGATURAN DATABASE (WAJIB DIJALANKAN PERTAMA KALI)
@@ -58,10 +84,14 @@ function verifyLoginServer(username, password) {
   
   // Looping data (mulai dari baris ke-2 / index 1 karena baris 1 adalah header)
   for (let i = 1; i < data.length; i++) {
-    let dbUser = data[i][2]; // Kolom Username
-    let dbPass = data[i][3]; // Kolom Password
+    let dbUser = String(data[i][2]).trim(); // Kolom Username
+    let dbPass = String(data[i][3]).trim(); // Kolom Password
+    let dbStatus = String(data[i][5]).trim(); // Kolom Status
     
-    if (dbUser === username && dbPass === password) {
+    if (dbUser === String(username).trim() && dbPass === String(password).trim()) {
+      if (dbStatus && dbStatus !== "Aktif") {
+        return { success: false, message: "Akun tidak aktif." };
+      }
       return {
         success: true,
         user: {

@@ -53,6 +53,25 @@
         .hide-view {
             display: none !important;
         }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+
+        /* Banner instal PWA: benar-benar tersembunyi saat tidak aktif */
+        .pwa-banner {
+            position: fixed;
+            left: 50%;
+            bottom: 5.5rem;
+            width: calc(100% - 2rem);
+            max-width: 26rem;
+            transform: translateX(-50%) translateY(0);
+            transition: transform .5s ease, opacity .5s ease, visibility .5s;
+        }
+        .pwa-banner.pwa-hidden {
+            transform: translateX(-50%) translateY(250%);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body class="bg-slate-50 font-sans antialiased text-slate-800 selection:bg-blue-200">
@@ -303,7 +322,7 @@
         </div>
 
         <!-- PWA Install Prompt Banner (Hidden by default) -->
-        <div id="pwa-install-banner" class="absolute bottom-20 left-4 right-4 bg-slate-900 text-white p-4 rounded-2xl shadow-2xl flex items-center justify-between z-50 transform translate-y-[150%] transition-transform duration-500">
+        <div id="pwa-install-banner" class="pwa-banner pwa-hidden bg-slate-900 text-white p-4 rounded-2xl shadow-2xl flex items-center justify-between gap-2 z-50">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 p-2 rounded-lg">
                     <i data-lucide="download" class="w-5 h-5 text-white"></i>
@@ -323,7 +342,55 @@
 
     <!-- Application Logic -->
     <script>
-        const IS_PREVIEW = false; // Berubah menjadi false agar mengaktifkan koneksi ke GAS
+        const IS_PREVIEW = false; // false = hubungkan ke Google Apps Script
+
+        // URL Web App Google Apps Script (berakhiran /exec).
+        // WAJIB diisi jika halaman ini di-hosting di luar Apps Script (mis. GitHub Pages).
+        // Contoh: "https://script.google.com/macros/s/AKfycb.../exec"
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbxBW_jXXCCw6LAZHRw4XiOV-lL_BJyqYfKs2F121iFscz5WUGIH-q6i8idWLPuLpIRo/exec";
+
+        // Memanggil fungsi server, otomatis memilih cara yang sesuai:
+        // - Di dalam Apps Script  -> google.script.run
+        // - Di luar (GitHub Pages) -> fetch ke GAS_URL
+        function callServer(action, payload) {
+            return new Promise((resolve, reject) => {
+                const insideGAS = typeof google !== 'undefined' && google.script && google.script.run;
+
+                if (insideGAS) {
+                    if (action === 'login') {
+                        google.script.run
+                            .withSuccessHandler(resolve)
+                            .withFailureHandler(reject)
+                            .verifyLoginServer(payload.username, payload.password);
+                    } else {
+                        reject(new Error('Aksi tidak dikenal: ' + action));
+                    }
+                    return;
+                }
+
+                if (!GAS_URL) {
+                    reject(new Error('GAS_URL belum diisi. Isi dengan URL Web App (/exec) Apps Script Anda.'));
+                    return;
+                }
+
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), 20000); // batas waktu 20 detik
+
+                // Tanpa header Content-Type kustom agar tidak memicu preflight CORS
+                fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({ action, ...payload }),
+                    signal: ctrl.signal
+                })
+                    .then(res => {
+                        if (!res.ok) throw new Error('HTTP ' + res.status);
+                        return res.json();
+                    })
+                    .then(resolve)
+                    .catch(reject)
+                    .finally(() => clearTimeout(timer));
+            });
+        }
 
         // Dummy Data (Sisa elemen UI yang belum dirender dari Sheets)
         const itemsData = [
@@ -403,37 +470,33 @@
                 return;
             }
 
-            // Jika mode produksi (IS_PREVIEW = false), hubungkan ke server GAS
-            google.script.run
-                .withSuccessHandler(function(response) {
-                    submitBtn.innerText = originalText;
-                    submitBtn.disabled = false;
-                    
-                    if (response.success) {
-                        // Login berhasil!
+            // Mode produksi: hubungkan ke server GAS
+            callServer('login', { username: user, password: pass })
+                .then(response => {
+                    if (response && response.success) {
                         errorMsg.classList.add('hidden');
                         sessionStorage.setItem('sipat_logged_in', 'true');
                         sessionStorage.setItem('sipat_user_name', response.user.nama);
                         sessionStorage.setItem('sipat_user_role', response.user.role);
-                        
-                        // Perbarui antarmuka UI dengan data user
-                        updateProfileUI(response.user); 
-                        
+                        updateProfileUI(response.user);
                         showMainView();
                     } else {
-                        // Login Gagal dari Server
                         errorMsg.classList.remove('hidden');
-                        errorMsg.innerText = response.message; 
+                        errorMsg.innerText = (response && response.message) || 'Login gagal.';
                     }
                 })
-                .withFailureHandler(function(error) {
-                    // Error koneksi/server
+                .catch(error => {
+                    console.error('Login error:', error);
+                    errorMsg.classList.remove('hidden');
+                    errorMsg.innerText = (error && error.name === 'AbortError')
+                        ? 'Server tidak merespons. Coba lagi.'
+                        : 'Terjadi kesalahan sistem. Periksa koneksi atau konfigurasi server.';
+                })
+                .finally(() => {
+                    // Selalu pulihkan tombol, apa pun hasilnya
                     submitBtn.innerText = originalText;
                     submitBtn.disabled = false;
-                    errorMsg.classList.remove('hidden');
-                    errorMsg.innerText = "Terjadi kesalahan sistem. Coba lagi atau periksa koneksi.";
-                })
-                .verifyLoginServer(user, pass); // Panggil fungsi di Code.gs
+                });
         }
 
         function updateProfileUI(userData) {
@@ -691,16 +754,16 @@
                 deferredPrompt = e;
                 // Show banner with delay for UX
                 setTimeout(() => {
-                    banner.classList.remove('translate-y-[150%]');
+                    banner.classList.remove('pwa-hidden');
                 }, 2000);
             });
 
             closeBtn.addEventListener('click', () => {
-                banner.classList.add('translate-y-[150%]');
+                banner.classList.add('pwa-hidden');
             });
 
             installBtn.addEventListener('click', async () => {
-                banner.classList.add('translate-y-[150%]');
+                banner.classList.add('pwa-hidden');
                 if (deferredPrompt) {
                     deferredPrompt.prompt();
                     const { outcome } = await deferredPrompt.userChoice;
