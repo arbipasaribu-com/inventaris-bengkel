@@ -102,7 +102,7 @@
                     </button>
                 </form>
                 <div class="mt-6 text-center">
-                    <p class="text-xs text-slate-400">Gunakan kredensial default untuk pratinjau<br>U: <b>admin</b> | P: <b>edudigital</b></p>
+                    <p class="text-xs text-slate-400">Gunakan kredensial default dari database<br>U: <b>admin</b> | P: <b>edudigital</b></p>
                 </div>
             </div>
         </div>
@@ -323,9 +323,9 @@
 
     <!-- Application Logic -->
     <script>
-        const IS_PREVIEW = false;
+        const IS_PREVIEW = false; // Berubah menjadi false agar mengaktifkan koneksi ke GAS
 
-        // Dummy Data
+        // Dummy Data (Sisa elemen UI yang belum dirender dari Sheets)
         const itemsData = [
             { id: 'INV-001', name: 'Multimeter Digital Fluke', category: 'Alat Ukur', total: 5, available: 3, status: 'Tersedia', icon: 'zap' },
             { id: 'INV-002', name: 'Tang Crimping RJ45/RJ11', category: 'Jaringan', total: 10, available: 0, status: 'Dipinjam', icon: 'network' },
@@ -356,8 +356,13 @@
             // Inisialisasi ikon untuk seluruh file statis
             lucide.createIcons();
             
-            // Check session (mock)
+            // Check session (apakah user sudah login sebelumnya)
             if(sessionStorage.getItem('sipat_logged_in') === 'true') {
+                const storedName = sessionStorage.getItem('sipat_user_name');
+                const storedRole = sessionStorage.getItem('sipat_user_role');
+                if(storedName && storedRole) {
+                    updateProfileUI({nama: storedName, role: storedRole});
+                }
                 showMainView();
             }
 
@@ -374,18 +379,81 @@
             const user = document.getElementById('username').value;
             const pass = document.getElementById('password').value;
             const errorMsg = document.getElementById('login-error');
+            
+            // Nonaktifkan tombol sementara untuk mencegah klik ganda
+            const submitBtn = document.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerText;
+            submitBtn.innerText = "Memverifikasi...";
+            submitBtn.disabled = true;
 
-            if (user === 'admin' && pass === 'edudigital') {
-                errorMsg.classList.add('hidden');
-                sessionStorage.setItem('sipat_logged_in', 'true');
-                showMainView();
-            } else {
-                errorMsg.classList.remove('hidden');
+            // Jika sedang dalam mode PREVIEW, gunakan login dummy
+            if (IS_PREVIEW) {
+                setTimeout(() => { 
+                    if (user === 'admin' && pass === 'edudigital') {
+                        errorMsg.classList.add('hidden');
+                        sessionStorage.setItem('sipat_logged_in', 'true');
+                        showMainView();
+                    } else {
+                        errorMsg.classList.remove('hidden');
+                        errorMsg.innerText = "Username atau password salah! (Mode Preview)";
+                    }
+                    submitBtn.innerText = originalText;
+                    submitBtn.disabled = false;
+                }, 800);
+                return;
             }
+
+            // Jika mode produksi (IS_PREVIEW = false), hubungkan ke server GAS
+            google.script.run
+                .withSuccessHandler(function(response) {
+                    submitBtn.innerText = originalText;
+                    submitBtn.disabled = false;
+                    
+                    if (response.success) {
+                        // Login berhasil!
+                        errorMsg.classList.add('hidden');
+                        sessionStorage.setItem('sipat_logged_in', 'true');
+                        sessionStorage.setItem('sipat_user_name', response.user.nama);
+                        sessionStorage.setItem('sipat_user_role', response.user.role);
+                        
+                        // Perbarui antarmuka UI dengan data user
+                        updateProfileUI(response.user); 
+                        
+                        showMainView();
+                    } else {
+                        // Login Gagal dari Server
+                        errorMsg.classList.remove('hidden');
+                        errorMsg.innerText = response.message; 
+                    }
+                })
+                .withFailureHandler(function(error) {
+                    // Error koneksi/server
+                    submitBtn.innerText = originalText;
+                    submitBtn.disabled = false;
+                    errorMsg.classList.remove('hidden');
+                    errorMsg.innerText = "Terjadi kesalahan sistem. Coba lagi atau periksa koneksi.";
+                })
+                .verifyLoginServer(user, pass); // Panggil fungsi di Code.gs
+        }
+
+        function updateProfileUI(userData) {
+            // Memperbarui sapaan di header atas
+            const headerName = document.querySelector('header h2');
+            if(headerName) headerName.innerText = userData.nama;
+            
+            // Memperbarui nama dan role di Tab Profil
+            const profileName = document.querySelector('#tab-profile h2');
+            const profileRole = document.querySelector('#tab-profile p.text-slate-500');
+            
+            if(profileName) profileName.innerText = userData.nama;
+            if(profileRole) profileRole.innerText = userData.role;
         }
 
         function handleLogout() {
             sessionStorage.removeItem('sipat_logged_in');
+            sessionStorage.removeItem('sipat_user_name');
+            sessionStorage.removeItem('sipat_user_role');
+            
             document.getElementById('main-view').classList.add('hide-view');
             document.getElementById('login-view').classList.remove('hide-view');
             
@@ -466,7 +534,7 @@
                 `;
             });
             container.innerHTML = html;
-            lucide.createIcons(); // Perbaikan: Langsung ubah ikon setelah disuntikkan
+            lucide.createIcons(); // Memastikan Ikon dimunculkan setelah data disuntikkan
         }
 
         function renderInventory() {
@@ -507,7 +575,7 @@
                 `;
             });
             container.innerHTML = html;
-            lucide.createIcons(); // Perbaikan: Langsung ubah ikon setelah disuntikkan
+            lucide.createIcons();
         }
 
         function renderTransactions() {
@@ -553,7 +621,7 @@
                 `;
             });
             container.innerHTML = html;
-            lucide.createIcons(); // Perbaikan: Langsung ubah ikon setelah disuntikkan
+            lucide.createIcons();
         }
 
         // ================= PWA Setup (Blob Injection Strategy) =================
